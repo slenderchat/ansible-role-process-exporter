@@ -30,4 +30,4 @@ ansible-lint --profile production
 yamllint -d '{extends: default, rules: {line-length: {max: 120}}}' .
 ```
 
-`files/process-exporter.yml` intentionally has no `---`, so yamllint reports a `document-start` warning for it. Behaviour that depends on systemd, capabilities and `/proc` access can only be verified on a RED OS host (README, step 4 of the migration procedure).
+Behaviour that depends on systemd, capabilities and `/proc` access can only be verified on a RED OS host (README, step 4 of the migration procedure).
