@@ -1,0 +1,10 @@
+Copyright (c) 2026 Nikita Grabar. All rights reserved.
+
+This is an all-rights-reserved distribution. It is not open-source software and
+is not distributed under an open-source license. No license is granted to use,
+copy, modify, or redistribute any part of it without the prior permission of the
+copyright holder.
+
+Process Exporter itself is a separate upstream project
+(https://github.com/ncabatoff/process-exporter) installed from the operating
+system package; it is not part of this distribution.

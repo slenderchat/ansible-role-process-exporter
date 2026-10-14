@@ -1,0 +1,46 @@
+# Managed by Ansible (role process_exporter). Local changes will be overwritten.
+[Unit]
+Description=Prometheus Process Exporter
+Documentation=https://github.com/ncabatoff/process-exporter
+After=network.target
+
+[Service]
+Type=simple
+User=process-exporter
+Group=process-exporter
+ExecStart=/usr/bin/process-exporter \
+    -web.listen-address=127.0.0.1:9256 \
+    -config.path=/opt/process-exporter/process-exporter.yml
+Restart=on-failure
+RestartSec=5s
+
+# Privileges: exactly two capabilities, granted to the unprivileged user as ambient
+# capabilities and capped by the bounding set. Without them the kernel hides other
+# users' /proc/<pid>/io and smaps_rollup (CAP_SYS_PTRACE) and /proc/<pid>/fd
+# (CAP_DAC_READ_SEARCH). Tested on RED OS 7.3 and 8: neither one alone is enough.
+# See the role README for the security implications before changing them.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+AmbientCapabilities=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+NoNewPrivileges=yes
+
+# Hardening. Nothing below restricts reading /proc/<pid>: the service shares the
+# host PID namespace and procfs mount, ProtectProc/ProcSubset/PrivateUsers are
+# deliberately not used.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RemoveIPC=yes
+
+[Install]
+WantedBy=multi-user.target

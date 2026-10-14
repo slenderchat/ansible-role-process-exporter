@@ -1,0 +1,171 @@
+---
+- name: Install Process Exporter package
+  ansible.builtin.dnf:
+    name: golang-github-ncabatoff-process-exporter
+    state: present
+  register: process_exporter_package
+
+- name: Create process-exporter system group
+  ansible.builtin.group:
+    name: process-exporter
+    system: true
+
+- name: Create process-exporter system user
+  ansible.builtin.user:
+    name: process-exporter
+    group: process-exporter
+    system: true
+    shell: /sbin/nologin
+    home: /
+    create_home: false
+    comment: Process Exporter
+
+- name: Create configuration directory
+  ansible.builtin.file:
+    path: /opt/process-exporter
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install process grouping configuration
+  ansible.builtin.copy:
+    src: process-exporter.yml
+    dest: /opt/process-exporter/process-exporter.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart process-exporter
+
+- name: Check for an existing systemd unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/process-exporter.service
+  register: process_exporter_unit_before
+
+- name: Install systemd unit
+  ansible.builtin.copy:
+    src: process-exporter.service
+    dest: /etc/systemd/system/process-exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: process_exporter_unit
+  notify:
+    - Reload systemd
+    - Restart process-exporter
+
+# Recovers from an earlier run that installed the unit file but did not reload systemd
+# (e.g. failed or interrupted daemon-reload): the file is unchanged now, so the copy
+# above does not notify, but systemd still runs the previously loaded unit.
+- name: Detect a unit file that systemd has not loaded yet
+  ansible.builtin.command:
+    argv: [systemctl, show, process-exporter, -p, NeedDaemonReload]
+  register: process_exporter_reload_pending
+  changed_when:
+    - "'NeedDaemonReload=yes' in process_exporter_reload_pending.stdout_lines"
+    - process_exporter_unit is not changed
+  check_mode: false
+  notify:
+    - Reload systemd
+    - Restart process-exporter
+
+- name: Apply pending systemd reload and service restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Read the unit configuration loaded by systemd
+  ansible.builtin.command:
+    argv: [systemctl, show, process-exporter,
+           -p, LoadState, -p, NeedDaemonReload, -p, User, -p, ExecStart, -p, EnvironmentFiles]
+  register: process_exporter_loaded_unit
+  changed_when: false
+  when: not ansible_check_mode
+
+# The previous unit reads OPTIONS from /etc/sysconfig/process-exporter and, without the
+# file, listens on all interfaces. Fail here, keeping the file, unless systemd runs the new unit.
+- name: Verify that systemd has loaded the new unit
+  ansible.builtin.assert:
+    that:
+      - "'LoadState=loaded' in process_exporter_loaded_unit.stdout_lines"
+      - "'NeedDaemonReload=no' in process_exporter_loaded_unit.stdout_lines"
+      - "'User=process-exporter' in process_exporter_loaded_unit.stdout_lines"
+      - "'-web.listen-address=127.0.0.1:9256' in process_exporter_loaded_unit.stdout"
+      - "'/etc/sysconfig/process-exporter' not in process_exporter_loaded_unit.stdout"
+    fail_msg: >-
+      systemd has not loaded the new process-exporter unit; /etc/sysconfig/process-exporter
+      was kept. Loaded unit: {{ process_exporter_loaded_unit.stdout_lines }}
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Remove obsolete options file
+  ansible.builtin.file:
+    path: /etc/sysconfig/process-exporter
+    state: absent
+
+- name: Enable and start process-exporter
+  ansible.builtin.systemd:
+    name: process-exporter
+    enabled: true
+    state: started
+  when: process_exporter_service_manageable | bool
+
+- name: Validate the running exporter
+  when: not ansible_check_mode
+  block:
+    - name: Wait for the metrics endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9256/metrics
+        return_content: true
+        use_proxy: false
+      register: process_exporter_metrics
+      until: process_exporter_metrics.status == 200
+      retries: 10
+      delay: 3
+
+    - name: Read process-exporter service state
+      ansible.builtin.command:
+        argv: [systemctl, show, process-exporter, -p, MainPID, -p, ActiveState, -p, SubState]
+      register: process_exporter_service_state
+      changed_when: false
+
+    - name: Read listeners on port 9256
+      ansible.builtin.command:
+        argv: [ss, -ltnp, "sport = :9256"]
+      register: process_exporter_listeners
+      changed_when: false
+
+    # An HTTP 200 alone could come from another process (e.g. a leftover container)
+    # still holding the port, so check that the listener belongs to this service.
+    - name: Verify that the service owns the only listener on 127.0.0.1:9256
+      ansible.builtin.assert:
+        that:
+          - "'ActiveState=active' in process_exporter_service_state.stdout_lines"
+          - "'SubState=running' in process_exporter_service_state.stdout_lines"
+          - process_exporter_listeners.stdout_lines | select('search', '^LISTEN') | list | length == 1
+          - process_exporter_listeners.stdout is search('127[.]0[.]0[.]1:9256 ')
+          - process_exporter_listeners.stdout is search('pid=' ~ process_exporter_main_pid ~ ',')
+        fail_msg: >-
+          process-exporter is not the (only) listener on 127.0.0.1:9256.
+          Service: {{ process_exporter_service_state.stdout_lines }}.
+          Listeners: {{ process_exporter_listeners.stdout_lines }}.
+          Make sure the old Docker container has been stopped.
+        quiet: true
+      vars:
+        process_exporter_main_pid: >-
+          {{ process_exporter_service_state.stdout_lines
+             | select('match', 'MainPID=') | first | default('MainPID=0') | regex_replace('^MainPID=', '') }}
+
+    # PID 1 runs as root, the exporter as process-exporter: both groups must be
+    # present for {{.Comm}} grouping and cross-user process visibility to work.
+    - name: Verify that process groups are exported
+      ansible.builtin.assert:
+        that:
+          - >-
+            process_exporter_metrics.content is
+            search('^namedprocess_namegroup_num_procs[{]groupname="systemd"[}] [1-9]', multiline=true)
+          - >-
+            process_exporter_metrics.content is
+            search('^namedprocess_namegroup_num_procs[{]groupname="process-exporte"[}] [1-9]', multiline=true)
+        fail_msg: >-
+          Process groups "systemd" (PID 1) and/or "process-exporte" are missing from
+          /metrics. Check /proc mount options (hidepid) and the process grouping configuration.
+        quiet: true

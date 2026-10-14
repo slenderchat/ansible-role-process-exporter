@@ -1,0 +1,6 @@
+---
+# In check mode, systemd cannot manage a service whose package or unit file
+# installation was only simulated, so such service operations are skipped.
+process_exporter_service_manageable: >-
+  {{ not ansible_check_mode
+     or (process_exporter_package is not changed and process_exporter_unit_before.stat.exists) }}
