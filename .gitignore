@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.tox/
+.pytest_cache/
+*.egg-info/
+
+# Ansible
+*.retry
+.ansible/
+.cache/
+fact_cache/
+collections/ansible_collections/
+.molecule/
+molecule/**/.cache/
+
+# Local inventories and host-specific variables
+inventory/
+inventories/
+inventory.ini
+inventory.yml
+hosts
+hosts.ini
+host_vars/
+*.local.yml
+*.local.ini
+
+# Secrets and credentials
+.vault_pass*
+vault_pass*
+*.vault
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+id_rsa*
+id_ed25519*
+
+# Agent-local files
+.claude/
+CLAUDE.local.md
+.mcp.json
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+tmp/
