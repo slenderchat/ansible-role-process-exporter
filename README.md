@@ -1,4 +1,6 @@
-# process_exporter
+# ansible-role-process-exporter
+
+[English](README.md) | [Русский](README.ru.md)
 
 Ansible role that installs [Process Exporter](https://github.com/ncabatoff/process-exporter) from the operating system package and runs it as a hardened systemd service, under a dedicated system user with exactly two Linux capabilities: `CAP_DAC_READ_SEARCH` and `CAP_SYS_PTRACE`.
 
